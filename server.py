@@ -16,8 +16,34 @@ class User:
     self.name      = username
     self.conn      = conn
     self.addr      = addr
-    self.lock      = threading.lock()  # lock for command queue
-    self.cmd_queue = []
+    self.lock      = threading.Lock()  # lock for message queue
+    self.has_msg   = threading.Condition(self.lock)
+    self.msg_queue = []
+
+  def get_messages(self):
+    """ Block until message queue is not empty. Return all the messages
+        and empty the message queue.
+    """
+    self.has_msg.acquire()
+    try:
+      while len(self.msg_queue) <= 0:
+        self.has_msg.wait()
+      messages = [msg for msg in self.msg_queue]
+      self.msg_queue = []
+      return messages
+    finally:
+      self.has_msg.release()
+      
+  def enqueue_message(self, msg: Status):
+    """ Enqueue an Status object into msg_queue, also notify conditional
+        variable. 
+    """
+    self.lock.acquire()
+    self.msg_queue.append(msg)
+    self.has_msg.notify()
+    self.lock.release()
+    
+    
 
 
 class Room:
@@ -36,10 +62,19 @@ class Room:
 
 
 class Table:
+  """ The concurrent data structure for storeing user, room, connection
+      data. 
 
+      Attributes:
+        rooms (dict)         : mapping room name to Room object
+        users (dict)         : mapping user naem to User object
+        conns (dict)         : mapping address to user name
+        lock (threading.Lock): lock for concurrent data structure
+  """
   def __init__(self, lock):
     self.rooms      = {}
     self.users      = {}
+    self.conns      = {}
     self.lock       = lock
     
   def user_registration(self, username: str, conn, addr):
@@ -47,6 +82,7 @@ class Table:
     status = self.__valid_registration(username, addr)
     if status.code not in { 401, 402 }:
       self.users[username] = User(username, conn, addr)
+      self.conns[hash(addr)] = username
       print(self)
     self.lock.release()
     return status
@@ -54,7 +90,7 @@ class Table:
   def user_disconnection(self, username: str):
     self.lock.acquire()
     self.__clear_disconnected_user(username)
-    del self.users[userid]
+    del self.users[username]
     self.lock.release()
 
   def join_room(self, roomName: str, username: str):
@@ -84,6 +120,22 @@ class Table:
     self.rooms[roomName].leave(user)
     self.lock.release()
 
+  def list_room_users(self, roomName: str):
+    self.lock.acquire()
+    users = { username for username in self.rooms[roomName].users }
+    self.lock.release()
+    return users
+
+  def enqueue_message(self, message: Status, receivers: list):
+    for receiver in receivers:
+      if receiver in self.users:
+        self.users[receiver].enqueue_message(message)
+
+  def flush_message_queue(self, addr):
+    username = self.conns[hash(addr)]
+    message = self.users[username].get_messages() # return whem message available
+    return message
+
   def __create_room(self, roomName: str, creator: User):
     self.rooms[roomName] = Room(roomName, creator)
 
@@ -93,7 +145,7 @@ class Table:
         return Status(401, "Duplicated registration")
       elif self.users[id].name == username:
         return Status(402, "Username existed")
-    return Status(200, "success")
+    return Status(200, username)
 
   def __valid_username(self, username: str):
     if username not in self.users:
@@ -103,7 +155,7 @@ class Table:
   def __valid_joining(self, roomName: str, username: str):
     if username in self.rooms[roomName].users:
       return Status(498, "Duplicated joining")
-    return Status(200, "success")
+    return Status(200, roomName + username)
 
   def __clear_disconnected_user(self, userid):
     """ Remove all the userid entry in all the rooms and notifiy all the rooms 
@@ -132,32 +184,62 @@ port = int(sys.argv[1])
 s.bind((host, port))
 s.listen(1)
 
+
+
 def process_connection(conn, addr):
-  """ 1. produce cmd
-      2. push cmd to user queue
-      3. pop first cmd from user queue
-      4. execute popped cmd
-      5. send to user
-  """
   print('client is at', addr) 
-  while(1):  
+  while(1):
     client_msg = conn.recv(1000000)
 
-    if client_msg == b'':  # client close the connection
+    if client_msg == b'':
       conn.close()
       break
-    
+
     client_msg = client_msg.decode(encoding="utf-8")
     print("addr: ", addr, "client message:", client_msg)
 
-    try:
-      cmd = command_factory.produce(client_msg, database)
-      status = cmd.execute(conn, addr)
-      conn.send(status.to_bytes())
+    registration = command_factory.produce(client_msg, database)
+    status = registration.execute(conn, addr)
+    conn.send(status.to_bytes())
+    
+    if status.code == 200:
+      break 
+      # now a user identity has been added into db
+      # then go to concurrent receiving and sending stage...
+  
+  def receive_client():
+    while(1):
+      client_msg = conn.recv(1000000)
 
-    except CommandError as e:
-      status = Status(400, "Bad command").to_bytes()
-      conn.send(status)
+      if client_msg == b'':
+        conn.close()
+        break 
+
+      client_msg = client_msg.decode(encoding="utf-8")
+      print("addr: ", addr, "client message:", client_msg)
+
+      try:
+        cmd = command_factory.produce(client_msg, database)
+        status = cmd.execute(conn, addr)
+        # conn.send(status.to_bytes())
+
+      except CommandError as _:
+        status = Status(400, "Bad command")
+        database.enqueue_message(status, [database.conns[hash(addr)]])
+  
+  def send_to_client():
+    while(1):
+      messages = database.flush_message_queue(addr)
+      for msg in messages:
+        conn.send(msg.to_bytes())
+
+  producer_thread = threading.Thread(target=receive_client)
+  consumer_thread = threading.Thread(target=send_to_client)
+  
+  producer_thread.start()
+  consumer_thread.start()
+
+
 
 
 while (1):

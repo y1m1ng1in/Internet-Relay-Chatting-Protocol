@@ -23,6 +23,7 @@ class Status:
   def to_bytes(self):
     return (str(self.code) + self.message).encode(encoding="utf-8")
 
+  @staticmethod
   def parse(bytes):
     code = int(bytes[:3].decode(encoding="utf-8"))
     message = bytes[3:].decode(encoding="utf-8")
