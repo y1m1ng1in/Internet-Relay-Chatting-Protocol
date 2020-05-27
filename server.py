@@ -1,7 +1,8 @@
 import socket
 import sys
 import threading
-from status import CommandError, Status
+from status import (
+  CommandError, Status, RegistrationStatus, JoinStatus, MessageStatus)
 from message import Msg, RegistrationCommand, JoinCommand, CommandFactory
 
 
@@ -43,8 +44,6 @@ class User:
     self.has_msg.notify()
     self.lock.release()
     
-    
-
 
 class Room:
 
@@ -104,9 +103,11 @@ class Table:
     """
     self.lock.acquire()
     status = self.__valid_username(username)
+    if status.code == 499:
+      status = JoinStatus(499, "User requested not found", roomName, username)
     if status.code == 200:
       if roomName not in self.rooms:
-        self.__create_room(roomName, self.users[username])
+        status = self.__create_room(roomName, self.users[username])
       else:
         status = self.__valid_joining(roomName, username)
         if status.code == 200:
@@ -122,7 +123,8 @@ class Table:
 
   def list_room_users(self, roomName: str):
     self.lock.acquire()
-    users = { username for username in self.rooms[roomName].users }
+    if roomName in self.rooms:
+      users = { username for username in self.rooms[roomName].users }
     self.lock.release()
     return users
 
@@ -138,14 +140,15 @@ class Table:
 
   def __create_room(self, roomName: str, creator: User):
     self.rooms[roomName] = Room(roomName, creator)
+    return JoinStatus(200, "success", roomName, creator.name, True)
 
   def __valid_registration(self, username: str, addr):
     for id in self.users:
       if self.users[id].addr == addr:
-        return Status(401, "Duplicated registration")
+        return RegistrationStatus(401, "Duplicated registration", username)
       elif self.users[id].name == username:
-        return Status(402, "Username existed")
-    return Status(200, username)
+        return RegistrationStatus(402, "Username existed", username)
+    return RegistrationStatus(200, "success", username)
 
   def __valid_username(self, username: str):
     if username not in self.users:
@@ -154,8 +157,8 @@ class Table:
 
   def __valid_joining(self, roomName: str, username: str):
     if username in self.rooms[roomName].users:
-      return Status(498, "Duplicated joining")
-    return Status(200, roomName + username)
+      return JoinStatus(498, "Duplicated joining", roomName, username)
+    return JoinStatus(200, "success", roomName, username)
 
   def __clear_disconnected_user(self, userid):
     """ Remove all the userid entry in all the rooms and notifiy all the rooms 

@@ -1,4 +1,4 @@
-from status import Status, CommandError
+from status import Status, CommandError, JoinStatus, MessageStatus
 
 class CommandFactory:
   """ Given a byte object, parse command and argument and produce 
@@ -15,6 +15,12 @@ class CommandFactory:
 
     elif cmd == '00002':
       return JoinCommand(bytes, table)
+
+    elif cmd == '00003':
+      return UserMessageToRooms(bytes, table)
+
+    elif cmd == '00004':
+      return UserMessageToUsers(bytes, table)
 
     else:
       raise CommandError(400, msg="cannot find appropriate command")
@@ -98,10 +104,78 @@ class JoinCommand(Msg):
       self.receivers = { self.username } 
 
 
-class UserMessage(Msg):
+class UserMessageToRooms(Msg):
   """ Parse the message sent from client by getting the message to 
       send, the user to receive, and send message to receiver user.
+      args: 
+        number of rooms to send (99 max, 2 digit)
+        room name (20 bytes each)
+        message
   """
   def __init__(self, bytes, table):
     super().__init__(bytes, table)
+    self.room_num = int(self.args[:2])
+    self.rooms = self.args[2:]
+    self.rooms = [self.args[2 + i*20 : 2 + (i+1)*20] for i in range(self.room_num)]
+    self.message = self.args[2 + self.room_num*20:]
+
+  def execute(self, conn, addr):
+    sender_name = self.table.conns[hash(addr)]
+    status = self.__valid_room_names(sender_name)
+    if status.code == 200:
+      receivers = self.__get_receivers()
+      for room in receivers:
+        status = MessageStatus(200, 'success', True, sender_name, room, '', self.message)
+        self.table.enqueue_message(status, receivers[room])
+    else:
+      receivers = [sender_name]
+      self.table.enqueue_message(status, receivers)
+
+  def __valid_room_names(self, sender):
+    for roomName in self.rooms:
+      if roomName not in self.table.rooms:
+        return MessageStatus(497, "Room not found", True, sender, roomName, '', self.message)
+      else:
+        return Status(200, "success")
+
+  def __get_receivers(self):
+    receivers = {}
+    for roomName in self.rooms:
+      receivers[roomName] = self.table.list_room_users(roomName)
+    return receivers
+
+
+class UserMessageToUsers(Msg):
+  """ Parse the message sent from client by getting the message to 
+      send, the user to receive, and send message to receiver user.
+      args: 
+        number of users to send (99 max, 2 digit)
+        message
+        00004__weirj&siofjwie&wioerj&ewroj#_____________
+  """
+  def __init__(self, bytes, table):
+    super().__init__(bytes, table)
+    self.user_num     = int(self.args[:2])
+    self.message_args = self.args[2:].split('#')
+    self.users         = self.message_args[0].split('&')
+    self.message       = self.message_args[1]
+
+  def execute(self, conn, addr):
+    sender_name = self.table.conns[hash(addr)]
+    status = self.__valid_usernames(sender_name)
+    if status.code == 200:
+      for user in self.users:
+        status = MessageStatus(200, 'success', False, sender_name, '', user, self.message)
+        self.table.enqueue_message(status, [user])
+        self.table.enqueue_message(status, [sender_name])
+    else:
+      receivers = [sender_name]
+      self.table.enqueue_message(status, receivers)
+
+  def __valid_usernames(self, sender):
+    for username in self.users:
+      if username not in self.table.users:
+        return MessageStatus(496, "Message receiver not found", False, sender, '', username, self.message)
+      else:
+        return Status(200, "success")
 
