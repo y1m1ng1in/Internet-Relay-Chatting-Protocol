@@ -1,4 +1,5 @@
-from status import Status, CommandError, JoinStatus, MessageStatus
+from status import (
+  Status, CommandError, JoinStatus, MessageStatus, DisconnectStatus)
 
 class CommandFactory:
   """ Given a byte object, parse command and argument and produce 
@@ -21,6 +22,9 @@ class CommandFactory:
 
     elif cmd == '00004':
       return UserMessageToUsers(bytes, table)
+
+    elif cmd == '00010':
+      return UserDisconnect(bytes, table)
 
     else:
       raise CommandError(400, msg="cannot find appropriate command")
@@ -179,3 +183,25 @@ class UserMessageToUsers(Msg):
       else:
         return Status(200, "success")
 
+
+class UserDisconnect(Msg):
+  """ Client subjectively close the connection (close not caused by crash)
+  """
+  def __init__(self, bytes, table):
+    super().__init__(bytes, table)
+    self.username = self.args
+
+  def execute(self, conn, addr):
+    to_notify, status = self.table.user_disconnection(self.username)
+    if status.code == 200:
+      status = self.table.clear_user_conn(addr)
+      if status.code != 200:
+        status = DisconnectStatus(status.code, status.message, self.username, addr)
+      else:
+        receivers = {}
+        for room in to_notify:
+          receivers[room] = self.table.list_room_users(room)
+        for room in receivers:
+          status = DisconnectStatus(200, "success", self.username)
+          self.table.enqueue_message(status, receivers[room])
+    return status

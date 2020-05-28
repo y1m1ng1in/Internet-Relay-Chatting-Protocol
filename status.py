@@ -11,6 +11,11 @@ class CommandError(Error):
     self.err_code = err_code
     self.err_msg = msg
 
+class UserDisconnectedException(Exception):
+  """ Handle user disconnections
+  """
+  pass
+
 
 class Status:
   """ Class for status code and status message
@@ -120,7 +125,7 @@ class JoinStatus(Status):
     if len(args) != 2:
       return None
 
-    username = args[0]
+    username     = args[0]
     message      = args[1]
 
     if command_code != '00002':
@@ -234,3 +239,58 @@ class MessageStatus(Status):
         print("[Private] " + self.sender + " sent to " + self.username + ": " + self.data)
       else:
         print("[Error code " + str(self.code) + "] Message sent to client: " + self.username + " " + self.message)
+
+
+class DisconnectStatus(Status):
+  """ Class for server to send back to client for user disconnection 
+  """
+  def __init__(self, code:int, message: str, username: str, addr=None):
+    super().__init__(code, message)
+    self.username = username  # error code 461 used
+    self.command_code = '00010'
+    self.addr = addr  # error code 462 used 
+
+  def to_bytes(self):
+    if self.addr == None:
+      return ('$' 
+        + str(self.code) 
+        + self.command_code 
+        + self.username 
+        + '#'
+        + '#'+ self.message 
+        + '$').encode(encoding="utf-8")
+    else:
+      return ('$' 
+        + str(self.code) 
+        + self.command_code 
+        + self.username + '#'
+        + self.addr + '#'
+        + self.message 
+        + '$').encode(encoding="utf-8")
+
+  @staticmethod
+  def parse(bytes):
+    if len(bytes) < 11:
+      return None
+
+    code = int(bytes[:3])
+    command_code = bytes[3:8]
+    if command_code != '00010':
+      return None
+    rest = bytes[8:]
+    args = rest.split('#')
+    if len(args) != 3:
+      return None
+    name = args[0]
+    addr = args[1]
+    message = args[2]
+    if addr == '':
+      addr = None
+    return DisconnectStatus(code, message, name, addr)
+
+  def print(self):
+    if self.code == 200:
+      print("[Disconnection] " + self.username + " disconnected.")
+    else:
+      print("[Error code " + str(self.code) + "] On disconnection: " + self.message)
+    

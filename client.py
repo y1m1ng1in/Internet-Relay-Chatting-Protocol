@@ -2,7 +2,8 @@ import socket
 import sys
 import re
 import threading
-from status import Status, RegistrationStatus, JoinStatus, MessageStatus
+from status import (
+  Status, RegistrationStatus, JoinStatus, MessageStatus, DisconnectStatus)
 
 if len(sys.argv) < 3:
     print("USAGE: echo_client_sockets.py <HOST> <PORT>") 
@@ -18,7 +19,7 @@ class CmdError(Exception):
 class ClientCmd:
 
   def __init__(self, socket):
-    self.cmds = { "register", "join", "send to rooms" }
+    self.cmds = { "register", "join", "send to rooms", "quit" }
     self.socket = socket
     self.username = ''
 
@@ -34,6 +35,8 @@ class ClientCmd:
       return SendToRooms(self.socket, self.username)
     elif input == "private message":
       return SendToUsers(self.socket, self.username)
+    elif input == "quit":
+      return Disconnection(self.socket, self.username)
     else:
       raise CmdError()
 
@@ -173,6 +176,20 @@ class SendToUsers(CmdExecution):
     self.socket.send(bytes.encode(encoding="utf-8"))
     return (self.users, self.message)
 
+
+class Disconnection(CmdExecution):
+
+  def __init__(self, socket, username):
+    super().__init__(socket)
+    self.username = username
+    self.command_code = '00010'
+
+  def execute(self):
+    bytes = (self.command_code + self.username).encode(encoding="utf-8")
+    self.socket.send(bytes)
+    return self.username
+
+
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 host = sys.argv[1]
 port = int(sys.argv[2])
@@ -186,6 +203,8 @@ to_execute = []
 
 status_pattern = re.compile('\$[\w#\s]+\$')
 user_unset = True
+
+manually_disconnected = False
 
 while(user_unset):
   sys.stdout.write('>>> ')
@@ -235,17 +254,15 @@ while(user_unset):
 
 def sending_thread():
   while(1):
+    # if manually_disconnected == True:
+    #   break
     msg = sys.stdin.readline()[:-1]
     if len(msg) == 0:
       lock.acquire()
       sys.stdout.write('>>> ')
       sys.stdout.flush()
       msg = sys.stdin.readline()[:-1]
-    
-      if msg == 'quit': 
-        s.close()
-        break
-    
+  
       try:
         to_execute = cmd.parse(msg)
         to_execute.execute()   
@@ -253,13 +270,17 @@ def sending_thread():
         print(e.message)
       finally:
         lock.release()
+
+      if msg == 'quit': 
+        break
     
     else:
       print("Enter a single newline character to enter command.")
 
 
 def receive_thread():
-  while(1):
+  run = True
+  while(run):
     data = s.recv(10000000)
     if data == b'':
       break
@@ -278,6 +299,11 @@ def receive_thread():
           parsed.append(JoinStatus.parse(msg))
         elif command_code == '00003' or command_code == '00004':
           parsed.append(MessageStatus.parse(msg))
+        elif command_code == '00010':
+          parsed_msg = DisconnectStatus.parse(msg)
+          parsed.append(parsed_msg)
+          if parsed_msg.username == cmd.username:
+            run = False
         else:
           parsed.append(Status.parse(msg))
       else:
@@ -299,4 +325,8 @@ receiving = threading.Thread(target=receive_thread)
 
 sending.start()
 receiving.start()
+
+sending.join()
+receiving.join()
   
+print(".............")

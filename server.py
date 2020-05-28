@@ -2,7 +2,8 @@ import socket
 import sys
 import threading
 from status import (
-  CommandError, Status, RegistrationStatus, JoinStatus, MessageStatus)
+  CommandError, UserDisconnectedException, Status, RegistrationStatus, 
+  JoinStatus, MessageStatus, DisconnectStatus)
 from message import Msg, RegistrationCommand, JoinCommand, CommandFactory
 
 
@@ -20,6 +21,7 @@ class User:
     self.lock      = threading.Lock()  # lock for message queue
     self.has_msg   = threading.Condition(self.lock)
     self.msg_queue = []
+    self.is_disconnected = False
 
   def get_messages(self):
     """ Block until message queue is not empty. Return all the messages
@@ -27,11 +29,14 @@ class User:
     """
     self.has_msg.acquire()
     try:
-      while len(self.msg_queue) <= 0:
+      while len(self.msg_queue) <= 0 and not self.is_disconnected:
         self.has_msg.wait()
-      messages = [msg for msg in self.msg_queue]
-      self.msg_queue = []
-      return messages
+      if not self.is_disconnected:
+        messages = [msg for msg in self.msg_queue]
+        self.msg_queue = []
+        return messages
+      else:
+        return None
     finally:
       self.has_msg.release()
       
@@ -41,6 +46,12 @@ class User:
     """
     self.lock.acquire()
     self.msg_queue.append(msg)
+    self.has_msg.notify()
+    self.lock.release()
+
+  def disconnection_release(self):
+    self.lock.acquire()
+    self.is_disconnected = True
     self.has_msg.notify()
     self.lock.release()
     
@@ -56,8 +67,14 @@ class Room:
   def join(self, user: User):
     self.users[user.name] = user
 
-  def leave(self, user: User):
-    del self.users[user.name]
+  def leave(self, username: str):
+    """ Remove a user from user dict. If user doesn't exist in this room,
+        remove nothing and return False. Otherwise, return True.
+    """
+    if username in self.users:
+      del self.users[username]
+      return True
+    return False
 
 
 class Table:
@@ -82,15 +99,46 @@ class Table:
     if status.code not in { 401, 402 }:
       self.users[username] = User(username, conn, addr)
       self.conns[hash(addr)] = username
+      print("hash", addr, hash(addr))
       print(self)
     self.lock.release()
     return status
 
   def user_disconnection(self, username: str):
+    """ This function remove user from all the rooms the user joined.
+        This functio also remove user from user in user list in 
+        server database. 
+        This function does not remove conn list entry. 
+    
+        Returns:
+          If username exist, return a set of room names to notify, and 
+          a base Status object to indicate a success step.
+          If username does not exist, return None and a DisconnectStatus
+          object to indicate username does not exist.
+    """
     self.lock.acquire()
-    self.__clear_disconnected_user(username)
-    del self.users[username]
+    to_notify, status = self.__clear_disconnected_user(username)
+    if status.code == 200:
+      # flush_message_queue will be returned
+      self.users[username].disconnection_release()  
+      del self.users[username]
     self.lock.release()
+    return to_notify, status
+
+  def clear_user_conn(self, addr):
+    """ Remove addr entry from conn dict. If the hash of addr does not
+        exist, return a Status object with error code 462 to indicate
+        failure; otherwise, remove it can return a Status object with 
+        code 200. 
+    """
+    self.lock.acquire()
+    if hash(addr) not in self.conns:
+      status = Status(462, "Disconnect cannot find address")
+    else:
+      del self.conns[hash(addr)]
+      status = Status(200, "success")
+    self.lock.release()
+    return status
 
   def join_room(self, roomName: str, username: str):
     """ Join a room or create a room based on whether room name exists.
@@ -134,6 +182,8 @@ class Table:
         self.users[receiver].enqueue_message(message)
 
   def flush_message_queue(self, addr):
+    if hash(addr) not in self.conns:
+      raise UserDisconnectedException
     username = self.conns[hash(addr)]
     message = self.users[username].get_messages() # return whem message available
     return message
@@ -160,11 +210,23 @@ class Table:
       return JoinStatus(498, "Duplicated joining", roomName, username)
     return JoinStatus(200, "success", roomName, username)
 
-  def __clear_disconnected_user(self, userid):
-    """ Remove all the userid entry in all the rooms and notifiy all the rooms 
-    """
-    pass
+  def __clear_disconnected_user(self, username):
+    """ Remove all the username in all the rooms and notifiy all the rooms 
 
+        Returns:
+          If username exist, return a status code 200 to indicate user exist, 
+          and a set of rooms to notify. 
+          If username does not exist, return None to indicate no room to 
+          notify and DisconnectStatus error code 461.
+    """
+    to_notify = set()
+    if username not in self.users:
+      return None, DisconnectStatus(461, "Disconnect user not found", username)
+    for room in self.rooms:     # remove user from room
+      if self.rooms[room].leave(username):
+        to_notify.add(room)
+    return to_notify, Status(200, "success")
+    
   def __str__(self):
     string = "users:\n"
     for name in self.users:
@@ -177,6 +239,29 @@ class Table:
       string += "\n"
     return string
   
+
+class RunningSignal:
+
+  def __init__(self, initial_state: bool =True):
+    self.run = initial_state
+    self.lock = threading.Lock()
+
+  def set_run(self):
+    self.lock.acquire()
+    self.run = True
+    self.lock.release()
+
+  def set_stop(self):
+    self.lock.acquire()
+    self.run = False
+    self.lock.release()
+
+  def is_run(self):
+    self.lock.acquire()
+    result = self.run
+    self.lock.release()
+    return result
+
 
 database        = Table(threading.Lock())
 command_factory = CommandFactory()
@@ -210,8 +295,8 @@ def process_connection(conn, addr):
       # now a user identity has been added into db
       # then go to concurrent receiving and sending stage...
   
-  def receive_client():
-    while(1):
+  def receive_client(signal: RunningSignal):  
+    while(signal.is_run()):
       client_msg = conn.recv(1000000)
 
       if client_msg == b'':
@@ -224,23 +309,39 @@ def process_connection(conn, addr):
       try:
         cmd = command_factory.produce(client_msg, database)
         status = cmd.execute(conn, addr)
-        # conn.send(status.to_bytes())
+        if isinstance(status, DisconnectStatus) and status.code == 200:
+          status.print()
+          signal.set_stop()
 
       except CommandError as _:
         status = Status(400, "Bad command")
         database.enqueue_message(status, [database.conns[hash(addr)]])
   
-  def send_to_client():
-    while(1):
-      messages = database.flush_message_queue(addr)
-      for msg in messages:
-        conn.send(msg.to_bytes())
+  def send_to_client(signal: RunningSignal):
+    run = True
+    while(signal.is_run() and run):
+      try:
+        messages = database.flush_message_queue(addr)
+        if messages == None:  # unblocked by disconnection_release
+          run = False
+        else:                 # unblocked by enqueu_message
+          for msg in messages:  
+            conn.send(msg.to_bytes())
+      except UserDisconnectedException as _:
+        run = False
 
-  producer_thread = threading.Thread(target=receive_client)
-  consumer_thread = threading.Thread(target=send_to_client)
+  signal = RunningSignal(True)
+  producer_thread = threading.Thread(target=receive_client, args=[signal])
+  consumer_thread = threading.Thread(target=send_to_client, args=[signal])
   
   producer_thread.start()
   consumer_thread.start()
+
+  producer_thread.join()
+  consumer_thread.join()
+
+  print(conn, addr, " joined")
+  conn.close()
 
 
 
