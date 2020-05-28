@@ -1,5 +1,6 @@
 from status import (
-  Status, CommandError, JoinStatus, MessageStatus, DisconnectStatus)
+  Status, CommandError, JoinStatus, MessageStatus, DisconnectStatus,
+  LeaveStatus)
 
 class CommandFactory:
   """ Given a byte object, parse command and argument and produce 
@@ -25,6 +26,9 @@ class CommandFactory:
 
     elif cmd == '00010':
       return UserDisconnect(bytes, table)
+
+    elif cmd == '00005':
+      return LeaveRoom(bytes, table)
 
     else:
       raise CommandError(400, msg="cannot find appropriate command")
@@ -210,3 +214,23 @@ class UserDisconnect(Msg):
       return DisconnectStatus(200, "success", self.username)
     else:
       return status
+
+
+class LeaveRoom(Msg):
+  """ Client leave a room. When client leave a room, the room will be notified.
+      The argument format is room name followed by username 
+  """
+  def __init__(self, bytes, table):
+    super().__init__(bytes, table)
+    self.room = self.args[:20]
+    self.username = self.args[20:]
+
+  def execute(self, conn, addr):
+    status = self.table.leave_room(self.room, self.username) 
+    if status.code == 200:
+      to_notify = self.table.list_room_users(self.room)
+      to_notify.add(self.username)  # also notify leaver itself success of leaving
+      self.table.enqueue_message(status, to_notify)
+    else:
+      self.table.enqueue_message(status, [self.table.conns[hash(addr)]])
+    return status

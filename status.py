@@ -300,4 +300,45 @@ class DisconnectStatus(Status):
         print("[Room] " + self.room + " " + self.username + " disconnected.")
     else:
       print("[Error code " + str(self.code) + "] On disconnection: " + self.message)
-    
+
+
+class LeaveStatus(Status):
+
+  def __init__(self, code: int, message: str, roomName: str, username: str):
+    super().__init__(code, message)
+    self.room = roomName
+    self.username = username    
+    self.command_code = '00005'
+
+  def to_bytes(self):
+    return ('$'
+      + str(self.code)
+      + self.command_code
+      + self.room
+      + self.username + '#'
+      + self.message
+      + '$').encode(encoding="utf-8")
+  
+  @staticmethod
+  def parse(bytes):
+    if len(bytes) < 11:
+      return None
+
+    code = int(bytes[:3])
+    command_code = bytes[3:8]
+    if command_code != '00005':
+      return None
+    room = bytes[8:28]
+    rest = bytes[28:].split('#')
+    if len(rest) != 2:
+      return None
+    username = rest[0]
+    message = rest[1]
+
+    return LeaveStatus(code, message, room, username)
+
+  def print(self):
+    if self.code == 200:
+      print("[Room] " + self.room + " " + self.username + " leaved")
+    else:
+      print("[Error code " + self.code + "] On room leaving: " + self.message)

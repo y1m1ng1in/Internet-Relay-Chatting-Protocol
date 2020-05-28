@@ -3,7 +3,7 @@ import sys
 import threading
 from status import (
   CommandError, UserDisconnectedException, Status, RegistrationStatus, 
-  JoinStatus, MessageStatus, DisconnectStatus)
+  JoinStatus, MessageStatus, DisconnectStatus, LeaveStatus)
 from message import Msg, RegistrationCommand, JoinCommand, CommandFactory
 
 
@@ -144,7 +144,7 @@ class Table:
     """ Join a room or create a room based on whether room name exists.
         If username given does not have a corresponding entry in users,
         a 499 error code will be sent. 
-        If user has already been in the given room, a 412 error code
+        If user has already been in the given room, a 498 error code
         will be sent to indicated duplicated join.
         The room name length must be valided before passed in to this 
         function.
@@ -164,10 +164,27 @@ class Table:
     self.lock.release()
     return status
 
-  def leave_room(self, roomName: str, user: User):
+  def leave_room(self, roomName: str, username: str):
+    """ User leave a room. 
+
+        Returns:
+          If room name does not exist in server database, a 450 error code
+          will be sent to indicate cannot find room to leave.
+          If user does not exist in this room, a 451 error code will
+          be sent to indicate user not found.
+    """
     self.lock.acquire()
-    self.rooms[roomName].leave(user)
+    status = self.__valid_username(username)
+    if status.code == 200:
+      if roomName not in self.rooms:
+        status = LeaveStatus(450, "Room to leave not found", roomName, username)
+      else:
+        if self.rooms[roomName].leave(username):  # True if username exist in this room 
+          status = LeaveStatus(200, "success", roomName, username)
+        else:
+          status = LeaveStatus(451, "User not found in room to leave", roomName, username)
     self.lock.release()
+    return status
 
   def list_room_users(self, roomName: str):
     self.lock.acquire()
