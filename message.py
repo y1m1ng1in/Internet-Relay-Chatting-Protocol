@@ -1,6 +1,6 @@
 from status import (
   Status, CommandError, JoinStatus, MessageStatus, DisconnectStatus,
-  LeaveStatus)
+  LeaveStatus, RoomUserListStatus)
 
 class CommandFactory:
   """ Given a byte object, parse command and argument and produce 
@@ -29,6 +29,12 @@ class CommandFactory:
 
     elif cmd == '00005':
       return LeaveRoom(bytes, table)
+
+    elif cmd == '00006':
+      return ListJoinedUsers(bytes, table)
+
+    elif cmd == '00007':
+      return ListCreatedRooms(bytes, table)
 
     else:
       raise CommandError(400, msg="cannot find appropriate command")
@@ -234,3 +240,32 @@ class LeaveRoom(Msg):
     else:
       self.table.enqueue_message(status, [self.table.conns[hash(addr)]])
     return status
+
+
+class ListJoinedUsers(Msg):
+  """ Client request to list all the joined users in a room.
+      The room name must exist, if the room name doesn't exist, an error code
+      will be sent back.
+      args:
+        room name
+  """
+  def __init__(self, bytes, table):
+    super().__init__(bytes, table)
+    self.room = self.args
+
+  def execute(self, conn, addr):
+    if self.table.has_room(self.room):
+      userlist = self.table.list_room_users(self.room)
+      status = RoomUserListStatus(200, "success", self.room, userlist)
+    else:
+      status = RoomUserListStatus(451, "Room not found to list joined users", self.room, set())
+    status.print()
+    self.table.enqueue_message(status, [self.table.conns[hash(addr)]])
+    return status
+
+
+class ListCreatedRooms(Msg):
+  """
+  """
+  def __init__(self, bytes, table):
+    super().__init__(bytes, table)

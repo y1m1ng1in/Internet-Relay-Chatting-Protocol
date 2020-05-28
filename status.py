@@ -342,3 +342,48 @@ class LeaveStatus(Status):
       print("[Room] " + self.room + " " + self.username + " leaved")
     else:
       print("[Error code " + self.code + "] On room leaving: " + self.message)
+
+
+class RoomUserListStatus(Status):
+
+  def __init__(self, code: int, message: str, room: str, userlist: set):
+    super().__init__(code, message)
+    self.room = room
+    self.userlist = userlist
+    self.command_code = '00006'
+
+  def to_bytes(self):
+    str_userlist = '&'.join(self.userlist)
+    return ('$'
+      + str(self.code)
+      + self.command_code
+      + self.room
+      + str_userlist
+      + '#' + self.message
+      + '$').encode(encoding="utf-8")
+
+  @staticmethod
+  def parse(bytes):
+    if len(bytes) < 11:
+      return None 
+    
+    code = int(bytes[:3])
+    command_code = bytes[3:8]
+    if command_code != '00006':
+      return None 
+    room = bytes[8:28]
+    rest = bytes[28:]
+    args = rest.split('#')
+    if len(args) != 2:
+      return None 
+    message = args[1]
+    userlist = set(args[0].split('&'))
+    return RoomUserListStatus(code, message, room, userlist)
+
+  def print(self):
+    if self.code == 200:
+      print("[Room] " + self.room + " " + "\nCurrent joined users:")
+      for user in self.userlist:
+        print(user)
+    else:
+      print("[Error code " + self.code + "] On list users in room " + self.message )

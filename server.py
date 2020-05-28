@@ -205,6 +205,28 @@ class Table:
     message = self.users[username].get_messages() # return whem message available
     return message
 
+  def has_room(self, roomName: str):
+    """ Helper function for code outside of the Table object determine whether
+        the room exist in current rooms dict. 
+        The code outside of the Table object must use this function instead of
+        access rooms dict directly without acquiring a lock.
+    """
+    self.lock.acquire()
+    has = roomName in self.rooms
+    self.lock.release()
+    return has
+
+  def has_username(self, username: str):
+    """ Helper function for code outside of the Table object determine whether
+        the username exist in current users dict.
+        The code outside of the Table object must use this function instead of
+        access users dict directly without acquiring a lock.
+    """
+    self.lock.acquire()
+    has = username in self.users
+    self.lock.release()
+    return has
+
   def __create_room(self, roomName: str, creator: User):
     self.rooms[roomName] = Room(roomName, creator)
     return JoinStatus(200, "success", roomName, creator.name, True)

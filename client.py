@@ -4,7 +4,7 @@ import re
 import threading
 from status import (
   Status, RegistrationStatus, JoinStatus, MessageStatus, DisconnectStatus,
-  LeaveStatus)
+  LeaveStatus, RoomUserListStatus)
 
 if len(sys.argv) < 3:
     print("USAGE: echo_client_sockets.py <HOST> <PORT>") 
@@ -40,6 +40,8 @@ class ClientCmd:
       return Disconnection(self.socket, self.username)
     elif input == "leave":
       return Leave(self.socket, self.username)
+    elif input == "room users":
+      return ListUsers(self.socket)
     else:
       raise CmdError()
 
@@ -57,6 +59,26 @@ class CmdExecution:
     name += ' ' * padding
     return name
 
+  @staticmethod
+  def input_room():
+    print("room name (20 characters max, no newline):")
+    sys.stdout.write('> ')
+    sys.stdout.flush()
+    name = sys.stdin.readline()[:-1]
+    name = CmdExecution.room_name_sanitize(name)
+    return name
+
+  @staticmethod
+  def input_username():
+    print("username (20 characters, no newline):")
+    sys.stdout.write('> ')
+    sys.stdout.flush()
+    name = sys.stdin.readline()[:-1]
+    if len(name) > 20:
+      print("Invalid username.")
+      return None
+    return name
+
   def execute(self):
     """ The method for child classes to override
         and to be called in the main loop 
@@ -71,14 +93,9 @@ class Registration(CmdExecution):
     self.command_code = '00001'
 
   def execute(self):
-    print("username (20 characters, no newline):")
-    sys.stdout.write('> ')
-    sys.stdout.flush()
-    name = sys.stdin.readline()[:-1]
-    if len(name) > 20:
-      print("Invalid username.")
-      return None
-    self.socket.send((self.command_code + name).encode(encoding="utf-8"))
+    name = CmdExecution.input_username()
+    if name != None:
+      self.socket.send((self.command_code + name).encode(encoding="utf-8"))
     return name
 
 
@@ -90,11 +107,7 @@ class Joining(CmdExecution):
     self.username = username
 
   def execute(self):
-    print("room name (20 characters max, no newline):")
-    sys.stdout.write('> ')
-    sys.stdout.flush()
-    name = sys.stdin.readline()[:-1]
-    name = CmdExecution.room_name_sanitize(name)
+    name = CmdExecution.input_room()
     if name == None:
       return None
     self.socket.send(
@@ -114,11 +127,7 @@ class SendToRooms(CmdExecution):
   def execute(self):
     more_room = True
     while(more_room):
-      print("room name (20 characters max, no newline):")
-      sys.stdout.write('> ')
-      sys.stdout.flush()
-      name = sys.stdin.readline()[:-1]
-      name = CmdExecution.room_name_sanitize(name)
+      name = CmdExecution.input_room()
       if name == None:
         return None
       self.rooms.add(name)
@@ -153,13 +162,9 @@ class SendToUsers(CmdExecution):
   def execute(self):
     more_users = True
     while(more_users):
-      print("username (20 characters, no newline):")
-      sys.stdout.write('> ')
-      sys.stdout.flush()
-      name = sys.stdin.readline()[:-1]
-      if len(name) > 20:
-        print("Invalid username.")
-        return None
+      name = CmdExecution.input_username()
+      if name == None:
+        return name
       self.users.add(name)
       print("send to more users? (y/n)")
       sys.stdout.write('> ')
@@ -201,16 +206,27 @@ class Leave(CmdExecution):
     self.command_code = '00005'
 
   def execute(self):
-    print("room name (20 characters max, no newline):")
-    sys.stdout.write('> ')
-    sys.stdout.flush()
-    name = sys.stdin.readline()[:-1]
-    name = CmdExecution.room_name_sanitize(name)
+    name = CmdExecution.input_room()
     if name == None:
       return None
     bytes = (self.command_code + name + self.username).encode(encoding="utf-8")
     self.socket.send(bytes)
     return name
+
+
+class ListUsers(CmdExecution):
+
+  def __init__(self, socket):
+    super().__init__(socket)
+    self.command_code = '00006'
+
+  def execute(self):
+    room = CmdExecution.input_room()
+    if room == None:
+      return None
+    bytes = (self.command_code + room).encode(encoding="utf-8")
+    self.socket.send(bytes)
+    return room
 
 
 
@@ -225,7 +241,7 @@ lock = threading.Lock()
 has_execution = threading.Condition()
 to_execute = []
 
-status_pattern = re.compile('\$[\w#\s]+\$')
+status_pattern = re.compile('\$[\w#\s&]+\$')
 user_unset = True
 
 manually_disconnected = False
@@ -308,12 +324,10 @@ def receive_thread():
     data = s.recv(10000000)
     if data == b'':
       break
-    # print(data)
     data = data.decode(encoding="utf-8")
     status = status_pattern.findall(data)
     parsed = []
     for msg in status:
-      # print(msg[1:-1])
       msg = msg[1:-1]
       if len(msg) >= 8:
         command_code = msg[3:8]
@@ -331,6 +345,8 @@ def receive_thread():
             run = False
         elif command_code == '00005':
           parsed.append(LeaveStatus.parse(msg))
+        elif command_code == '00006':
+          parsed.append(RoomUserListStatus.parse(msg))
         else:
           parsed.append(Status.parse(msg))
       else:
