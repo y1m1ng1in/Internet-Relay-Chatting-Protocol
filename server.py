@@ -310,7 +310,7 @@ def process_connection(conn, addr):
         cmd = command_factory.produce(client_msg, database)
         status = cmd.execute(conn, addr)
         if isinstance(status, DisconnectStatus) and status.code == 200:
-          status.print()
+          # status.print()
           signal.set_stop()
 
       except CommandError as _:

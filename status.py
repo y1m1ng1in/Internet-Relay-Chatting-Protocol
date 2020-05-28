@@ -35,7 +35,7 @@ class Status:
     return Status(code, message)
 
   def print(self):
-    print(self.code + " " + self.message)
+    print(str(self.code) + " " + self.message)
 
 
 class RegistrationStatus(Status):
@@ -244,11 +244,12 @@ class MessageStatus(Status):
 class DisconnectStatus(Status):
   """ Class for server to send back to client for user disconnection 
   """
-  def __init__(self, code:int, message: str, username: str, addr=None):
+  def __init__(self, code:int, message: str, username: str, room: str = '', addr=None):
     super().__init__(code, message)
     self.username = username  # error code 461 used
     self.command_code = '00010'
     self.addr = addr  # error code 462 used 
+    self.room = room  # used to notify a room that someone disconnected
 
   def to_bytes(self):
     if self.addr == None:
@@ -257,6 +258,7 @@ class DisconnectStatus(Status):
         + self.command_code 
         + self.username 
         + '#'
+        + '#' + self.room
         + '#'+ self.message 
         + '$').encode(encoding="utf-8")
     else:
@@ -265,6 +267,7 @@ class DisconnectStatus(Status):
         + self.command_code 
         + self.username + '#'
         + self.addr + '#'
+        + self.room + '#'
         + self.message 
         + '$').encode(encoding="utf-8")
 
@@ -279,18 +282,22 @@ class DisconnectStatus(Status):
       return None
     rest = bytes[8:]
     args = rest.split('#')
-    if len(args) != 3:
+    if len(args) != 4:
       return None
     name = args[0]
     addr = args[1]
-    message = args[2]
+    room = args[2]
+    message = args[3]
     if addr == '':
       addr = None
-    return DisconnectStatus(code, message, name, addr)
+    return DisconnectStatus(code, message, name, room, addr)
 
   def print(self):
     if self.code == 200:
-      print("[Disconnection] " + self.username + " disconnected.")
+      if self.room == '':
+        print("[Disconnection] " + self.username + " disconnected.")
+      else:
+        print("[Room] " + self.room + " " + self.username + " disconnected.")
     else:
       print("[Error code " + str(self.code) + "] On disconnection: " + self.message)
     

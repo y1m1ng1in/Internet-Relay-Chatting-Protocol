@@ -284,12 +284,12 @@ def receive_thread():
     data = s.recv(10000000)
     if data == b'':
       break
-    # print(data)
+    print(data)
     data = data.decode(encoding="utf-8")
     status = status_pattern.findall(data)
     parsed = []
     for msg in status:
-      # print(msg[1:-1])
+      print(msg[1:-1])
       msg = msg[1:-1]
       if len(msg) >= 8:
         command_code = msg[3:8]
@@ -302,6 +302,7 @@ def receive_thread():
         elif command_code == '00010':
           parsed_msg = DisconnectStatus.parse(msg)
           parsed.append(parsed_msg)
+          print(parsed_msg.username, cmd.username)
           if parsed_msg.username == cmd.username:
             run = False
         else:

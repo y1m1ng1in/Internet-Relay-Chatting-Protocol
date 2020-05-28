@@ -152,6 +152,7 @@ class UserMessageToRooms(Msg):
 class UserMessageToUsers(Msg):
   """ Parse the message sent from client by getting the message to 
       send, the user to receive, and send message to receiver user.
+      The sender will also receive a copy of what it sent.
       args: 
         number of users to send (99 max, 2 digit)
         message
@@ -171,6 +172,7 @@ class UserMessageToUsers(Msg):
       for user in self.users:
         status = MessageStatus(200, 'success', False, sender_name, '', user, self.message)
         self.table.enqueue_message(status, [user])
+      if sender_name not in self.users:
         self.table.enqueue_message(status, [sender_name])
     else:
       receivers = [sender_name]
@@ -195,13 +197,16 @@ class UserDisconnect(Msg):
     to_notify, status = self.table.user_disconnection(self.username)
     if status.code == 200:
       status = self.table.clear_user_conn(addr)
-      if status.code != 200:
+      if status.code != 200:  # internal error of this protocol
         status = DisconnectStatus(status.code, status.message, self.username, addr)
-      else:
-        receivers = {}
+      else:                   # clear user from server db successfully
+        receivers = {}        # now notify rooms that user joined before disconnected
         for room in to_notify:
           receivers[room] = self.table.list_room_users(room)
-        for room in receivers:
-          status = DisconnectStatus(200, "success", self.username)
+        for room in receivers:  # enqueue a message to each users in rooms
+          status = DisconnectStatus(200, "success", self.username, room=room)
           self.table.enqueue_message(status, receivers[room])
-    return status
+    if status.code == 200:  # the returned object indicate success of curr user disconnection
+      return DisconnectStatus(200, "success", self.username)
+    else:
+      return status
