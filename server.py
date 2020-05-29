@@ -3,7 +3,7 @@ import sys
 import threading
 from status import (
   CommandError, UserDisconnectedException, Status, RegistrationStatus, 
-  JoinStatus, MessageStatus, DisconnectStatus, LeaveStatus)
+  JoinStatus, MessageStatus, DisconnectStatus, LeaveStatus, AddrError)
 from message import Msg, RegistrationCommand, JoinCommand, CommandFactory
 
 
@@ -186,6 +186,12 @@ class Table:
     self.lock.release()
     return status
 
+  def list_rooms(self):
+    self.lock.acquire()
+    rooms = {room for room in self.rooms}
+    self.lock.release()
+    return rooms
+
   def list_room_users(self, roomName: str):
     self.lock.acquire()
     if roomName in self.rooms:
@@ -226,6 +232,32 @@ class Table:
     has = username in self.users
     self.lock.release()
     return has
+
+  def has_addr(self, addr):
+    """ Helper function for code outside of the Table object determine whether 
+        the given addr exist in current conns dict.
+        The code outside of the Table object must use this function instead of
+        access conns dict directly without acquiring a lock.
+    """
+    self.lock.acquire()
+    has = hash(addr) in self.conns
+    self.lock.release()
+    return has
+
+  def get_username_by_addr(self, addr):
+    """ Return username that corresponds to given address.
+        This function should always be called after validate the given addr.
+        If the hash of addr is not presented, it is an internal error of 
+        our server code.
+    """
+    self.lock.acquire()
+    if hash(addr) in self.conns:
+      username = self.conns[hash(addr)]
+    else:
+      self.lock.release()
+      raise AddrError()   # error occurs due to server code itself
+    self.lock.release()
+    return username
 
   def __create_room(self, roomName: str, creator: User):
     self.rooms[roomName] = Room(roomName, creator)
@@ -325,7 +357,7 @@ def process_connection(conn, addr):
     client_msg = client_msg.decode(encoding="utf-8")
     print("addr: ", addr, "client message:", client_msg)
 
-    registration = command_factory.produce(client_msg, database)
+    registration = RegistrationCommand(client_msg, database)
     status = registration.execute(conn, addr)
     conn.send(status.to_bytes())
     

@@ -4,7 +4,7 @@ import re
 import threading
 from status import (
   Status, RegistrationStatus, JoinStatus, MessageStatus, DisconnectStatus,
-  LeaveStatus, RoomUserListStatus)
+  LeaveStatus, RoomUserListStatus, ListRoomStatus)
 
 if len(sys.argv) < 3:
     print("USAGE: echo_client_sockets.py <HOST> <PORT>") 
@@ -42,6 +42,8 @@ class ClientCmd:
       return Leave(self.socket, self.username)
     elif input == "room users":
       return ListUsers(self.socket)
+    elif input == "rooms":
+      return ListRooms(self.socket)
     else:
       raise CmdError()
 
@@ -229,6 +231,16 @@ class ListUsers(CmdExecution):
     return room
 
 
+class ListRooms(CmdExecution):
+  def __init__(self, socket):
+    super().__init__(socket)
+    self.command_code = '00007'
+
+  def execute(self):
+    bytes = (self.command_code).encode(encoding="utf-8")
+    self.socket.send(bytes)
+    return bytes
+
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 host = sys.argv[1]
@@ -241,7 +253,8 @@ lock = threading.Lock()
 has_execution = threading.Condition()
 to_execute = []
 
-status_pattern = re.compile('\$[\w#\s&]+\$')
+# status_pattern = re.compile('\$[\w#\s&]+\$')
+status_pattern = re.compile('\$[^\$]+\$')
 user_unset = True
 
 manually_disconnected = False
@@ -261,9 +274,11 @@ while(user_unset):
     data = data.decode(encoding="utf-8")
     status = status_pattern.findall(data)
     parsed = []
+
     for msg in status:
       # print(msg[1:-1])
       msg = msg[1:-1]
+      # print(msg)
       if len(msg) >= 8:
         command_code = msg[3:8]
         if command_code == '00001':
@@ -274,19 +289,19 @@ while(user_unset):
         parsed.append(Status.parse(msg))
       
     # status = Status.parse(data)
-
-    if isinstance(to_execute, Registration):
-      for msg in parsed:
-        if msg.code == 200 and msg.command_code == '00001':
+    
+    for msg in parsed:
+      if msg.code == 200 and msg.command_code == '00001':
+        if isinstance(to_execute, Registration):
           cmd.set_username(msg.username)
           user_unset = False
 
-        if msg.code in { 400, 401, 402, 411, 450, 451, 496, 497, 498, 499 }:  # errors...
-          msg.print()
-        elif msg.code in { 200 }:  # success
-          msg.print()
-        else:
-          print("unknown status code...")
+      if msg.code in { 400, 401, 402, 411, 420, 450, 451, 496, 497, 498, 499 }:  # errors...
+        msg.print()
+      elif msg.code in { 200 }:  # success
+        msg.print()
+      else:
+        print("unknown status code...")
   
   except CmdError as e:
     print(e.message)
@@ -322,6 +337,7 @@ def receive_thread():
   run = True
   while(run):
     data = s.recv(10000000)
+    # print(data)
     if data == b'':
       break
     data = data.decode(encoding="utf-8")
@@ -347,6 +363,8 @@ def receive_thread():
           parsed.append(LeaveStatus.parse(msg))
         elif command_code == '00006':
           parsed.append(RoomUserListStatus.parse(msg))
+        elif command_code == '00007':
+          parsed.append(ListRoomStatus.parse(msg))
         else:
           parsed.append(Status.parse(msg))
       else:
@@ -372,4 +390,4 @@ receiving.start()
 sending.join()
 receiving.join()
   
-print(".............")
+print("Disconnected from server successfully.")

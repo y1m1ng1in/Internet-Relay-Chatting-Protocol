@@ -11,6 +11,13 @@ class CommandError(Error):
     self.err_code = err_code
     self.err_msg = msg
 
+class AddrError(Error):
+  """ Error of server code itself in address of client.
+      The address is valid and reigstered but not presented in
+      the server db.
+  """
+  pass
+
 class UserDisconnectedException(Exception):
   """ Handle user disconnections
   """
@@ -387,3 +394,44 @@ class RoomUserListStatus(Status):
         print(user)
     else:
       print("[Error code " + self.code + "] On list users in room " + self.message )
+
+
+class ListRoomStatus(Status):
+
+  def __init__(self, code: int, message: str, rooms: set):
+    super().__init__(code, message)
+    self.rooms = rooms
+    self.command_code = '00007'
+
+  def to_bytes(self):
+    str_roomlist = '&'.join(self.rooms)
+    return ('$'
+      + str(self.code)
+      + self.command_code
+      + str_roomlist
+      + '#' + self.message
+      + '$').encode(encoding="utf-8")
+
+  @staticmethod
+  def parse(bytes):
+    if len(bytes) < 11:
+      return None 
+
+    code = int(bytes[:3])
+    command_code = bytes[3:8]
+    if command_code != '00007':
+      return None 
+    rest = bytes[8:].split("#")
+    if len(rest) != 2:
+      return None 
+    message = rest[1]
+    rooms = set(rest[0].split('&'))
+    return ListRoomStatus(code, message, rooms)
+
+  def print(self):
+    if self.code == 200:
+      print("[Room] Current room list:")
+      for room in self.rooms:
+        print(room)
+    else:
+      print("[Error code " + self.code + "] " + self.message)

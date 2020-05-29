@@ -1,6 +1,6 @@
 from status import (
   Status, CommandError, JoinStatus, MessageStatus, DisconnectStatus,
-  LeaveStatus, RoomUserListStatus)
+  LeaveStatus, RoomUserListStatus, ListRoomStatus)
 
 class CommandFactory:
   """ Given a byte object, parse command and argument and produce 
@@ -51,9 +51,23 @@ class Msg:
                          sent from server.
   """
   def __init__(self, bytes, table):
+    self.command   = bytes[:5]
     self.args      = bytes[5:]
     self.table     = table
     self.receivers = None
+
+  def valid_addr(self, addr):
+    """ Check whether given addr is registered. 
+
+        Returns:
+          If it is registered, return a Status object with code 200.
+          If not, return a Status object with code 420 to indicate non-registered
+          address is requesting. 
+    """
+    if self.table.has_addr(addr):
+      return Status(200, "success")
+    else:
+      return Status(420, "Not registered address" + str(addr))
 
   def execute(self, conn, addr):
     pass
@@ -74,11 +88,20 @@ class RegistrationCommand(Msg):
     self.username  = self.args
 
   def execute(self, conn, addr):
-    if hash(addr) in self.table.conns:
+    # if hash(addr) in self.table.conns:
+    if self.table.has_addr(addr):
       status = self.table.user_registration(self.username, conn, addr)
-      self.table.enqueue_message(status, [self.table.conns[hash(addr)]])
+      self.table.enqueue_message(status, [self.table.get_username_by_addr(addr)])
     else:
-      status = self.table.user_registration(self.username, conn, addr)
+      if self.command != '00001': 
+        # During thread for current client conn in registration phrase, 
+        # any message sent to server will be treated as a registration command.
+        # Thus, if the command code is not equal to registration command code, 
+        # it will return an error code 420 back to client.
+        status = Status(
+          420, "Not registered address " + str(addr) + ", register a username first.")
+      else:
+        status = self.table.user_registration(self.username, conn, addr)
     return status
 
 
@@ -98,6 +121,10 @@ class JoinCommand(Msg):
     self.username = self.args[20:]
 
   def execute(self, conn, addr):
+    status = self.valid_addr(addr)
+    if status.code != 200:
+      return status
+
     status = self.table.join_room(self.roomName, self.username)
     self.__get_receivers(status)
     if self.receivers != {}:  
@@ -106,7 +133,7 @@ class JoinCommand(Msg):
       # in current thread
       self.table.enqueue_message(status, self.receivers)
     else:
-      self.table.enqueue_message(status, [self.table.conns[hash(addr)]])
+      self.table.enqueue_message(status, [self.table.get_username_by_addr(addr)])
     return status
 
   def __get_receivers(self, status: Status):
@@ -134,7 +161,11 @@ class UserMessageToRooms(Msg):
     self.message = self.args[2 + self.room_num*20:]
 
   def execute(self, conn, addr):
-    sender_name = self.table.conns[hash(addr)]
+    status = self.valid_addr(addr)
+    if status.code != 200:
+      return status
+
+    sender_name = self.table.get_username_by_addr(addr)
     status = self.__valid_room_names(sender_name)
     if status.code == 200:
       receivers = self.__get_receivers()
@@ -147,7 +178,8 @@ class UserMessageToRooms(Msg):
 
   def __valid_room_names(self, sender):
     for roomName in self.rooms:
-      if roomName not in self.table.rooms:
+      # if roomName not in self.table.rooms:
+      if not self.table.has_room(roomName):
         return MessageStatus(497, "Room not found", True, sender, roomName, '', self.message)
       else:
         return Status(200, "success")
@@ -176,7 +208,11 @@ class UserMessageToUsers(Msg):
     self.message       = self.message_args[1]
 
   def execute(self, conn, addr):
-    sender_name = self.table.conns[hash(addr)]
+    status = self.valid_addr(addr)
+    if status.code != 200:
+      return status
+
+    sender_name = self.table.get_username_by_addr(addr)
     status = self.__valid_usernames(sender_name)
     if status.code == 200:
       for user in self.users:
@@ -190,7 +226,8 @@ class UserMessageToUsers(Msg):
 
   def __valid_usernames(self, sender):
     for username in self.users:
-      if username not in self.table.users:
+      # if username not in self.table.users:
+      if not self.table.has_username(username):
         return MessageStatus(496, "Message receiver not found", False, sender, '', username, self.message)
       else:
         return Status(200, "success")
@@ -204,6 +241,10 @@ class UserDisconnect(Msg):
     self.username = self.args
 
   def execute(self, conn, addr):
+    status = self.valid_addr(addr)
+    if status.code != 200:
+      return status
+
     to_notify, status = self.table.user_disconnection(self.username)
     if status.code == 200:
       status = self.table.clear_user_conn(addr)
@@ -216,8 +257,13 @@ class UserDisconnect(Msg):
         for room in receivers:  # enqueue a message to each users in rooms
           status = DisconnectStatus(200, "success", self.username, room=room)
           self.table.enqueue_message(status, receivers[room])
-    if status.code == 200:  # the returned object indicate success of curr user disconnection
-      return DisconnectStatus(200, "success", self.username)
+
+    if status.code == 200:  
+      # the returned object indicate success of curr user disconnection
+      # this status object will not be sent to client at addr. 
+      # Return status object to trigger current thread for client at addr
+      # to stop running.
+      return DisconnectStatus(200, "success", self.username)  
     else:
       return status
 
@@ -232,13 +278,15 @@ class LeaveRoom(Msg):
     self.username = self.args[20:]
 
   def execute(self, conn, addr):
-    status = self.table.leave_room(self.room, self.username) 
+    status = self.valid_addr(addr)
     if status.code == 200:
-      to_notify = self.table.list_room_users(self.room)
-      to_notify.add(self.username)  # also notify leaver itself success of leaving
-      self.table.enqueue_message(status, to_notify)
-    else:
-      self.table.enqueue_message(status, [self.table.conns[hash(addr)]])
+      status = self.table.leave_room(self.room, self.username) 
+      if status.code == 200:
+        to_notify = self.table.list_room_users(self.room)
+        to_notify.add(self.username)  # also notify leaver itself success of leaving
+        self.table.enqueue_message(status, to_notify)
+      else:
+        self.table.enqueue_message(status, [self.table.get_username_by_addr(addr)])
     return status
 
 
@@ -254,18 +302,29 @@ class ListJoinedUsers(Msg):
     self.room = self.args
 
   def execute(self, conn, addr):
-    if self.table.has_room(self.room):
-      userlist = self.table.list_room_users(self.room)
-      status = RoomUserListStatus(200, "success", self.room, userlist)
-    else:
-      status = RoomUserListStatus(451, "Room not found to list joined users", self.room, set())
-    status.print()
-    self.table.enqueue_message(status, [self.table.conns[hash(addr)]])
+    status = self.valid_addr(addr)
+    if status.code == 200:
+      if self.table.has_room(self.room):
+        userlist = self.table.list_room_users(self.room)
+        status = RoomUserListStatus(200, "success", self.room, userlist)
+      else:
+        status = RoomUserListStatus(451, "Room not found to list joined users", self.room, set())
+      # status.print()
+      self.table.enqueue_message(status, [self.table.get_username_by_addr(addr)])
     return status
 
 
 class ListCreatedRooms(Msg):
-  """
+  """ Client request to list all rooms existed. No argument should be provided.
+      The addr must be registered in order to get a list of rooms.
   """
   def __init__(self, bytes, table):
     super().__init__(bytes, table)
+
+  def execute(self, conn, addr):
+    status = self.valid_addr(addr)
+    if status.code == 200:
+      rooms = self.table.list_rooms()
+      status = ListRoomStatus(200, "success", rooms)
+      self.table.enqueue_message(status, [self.table.get_username_by_addr(addr)])
+    return status
