@@ -347,10 +347,12 @@ s.listen(1)
 
 def process_connection(conn, addr):
   print('client is at', addr) 
+  init_signal = True
   while(1):
     client_msg = conn.recv(1000000)
 
     if client_msg == b'':
+      init_signal = False   # client close the conn during registration
       conn.close()
       break
 
@@ -401,15 +403,16 @@ def process_connection(conn, addr):
       except UserDisconnectedException as _:
         run = False
 
-  signal = RunningSignal(True)
-  producer_thread = threading.Thread(target=receive_client, args=[signal])
-  consumer_thread = threading.Thread(target=send_to_client, args=[signal])
-  
-  producer_thread.start()
-  consumer_thread.start()
+  if init_signal:
+    signal = RunningSignal(init_signal)
+    producer_thread = threading.Thread(target=receive_client, args=[signal])
+    consumer_thread = threading.Thread(target=send_to_client, args=[signal])
+    
+    producer_thread.start()
+    consumer_thread.start()
 
-  producer_thread.join()
-  consumer_thread.join()
+    producer_thread.join()
+    consumer_thread.join()
 
   print(conn, addr, " joined")
   conn.close()

@@ -265,6 +265,7 @@ while(user_unset):
   msg = sys.stdin.readline()[:-1]
   if msg == 'quit': 
     s.close()
+    manually_disconnected = True
     break
   try:
     to_execute = cmd.parse(msg)
@@ -380,14 +381,14 @@ def receive_thread():
         print("unknown status code...")
     lock.release()
 
+if not manually_disconnected:
+  sending = threading.Thread(target=sending_thread)
+  receiving = threading.Thread(target=receive_thread)
 
-sending = threading.Thread(target=sending_thread)
-receiving = threading.Thread(target=receive_thread)
+  sending.start()
+  receiving.start()
 
-sending.start()
-receiving.start()
-
-sending.join()
-receiving.join()
-  
-print("Disconnected from server successfully.")
+  sending.join()
+  receiving.join()
+    
+  print("Disconnected from server successfully.")
