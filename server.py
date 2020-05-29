@@ -4,7 +4,8 @@ import threading
 from status import (
   CommandError, UserDisconnectedException, Status, RegistrationStatus, 
   JoinStatus, MessageStatus, DisconnectStatus, LeaveStatus, AddrError)
-from message import Msg, RegistrationCommand, JoinCommand, CommandFactory
+from message import (
+  Msg, RegistrationCommand, JoinCommand, CommandFactory, UserDisconnect)
 
 
 if len(sys.argv) < 2:
@@ -370,16 +371,16 @@ def process_connection(conn, addr):
   
   def receive_client(signal: RunningSignal):  
     while(signal.is_run()):
-      client_msg = conn.recv(1000000)
-
-      if client_msg == b'':
-        conn.close()
-        break 
-
-      client_msg = client_msg.decode(encoding="utf-8")
-      print("addr: ", addr, "client message:", client_msg)
-
       try:
+        client_msg = conn.recv(1000000)
+
+        if client_msg == b'':
+          conn.close()
+          break 
+
+        client_msg = client_msg.decode(encoding="utf-8")
+        print("addr: ", addr, "client message:", client_msg)
+
         cmd = command_factory.produce(client_msg, database)
         status = cmd.execute(conn, addr)
         if isinstance(status, DisconnectStatus) and status.code == 200:
@@ -389,6 +390,12 @@ def process_connection(conn, addr):
       except CommandError as _:
         status = Status(400, "Bad command")
         database.enqueue_message(status, [database.conns[hash(addr)]])
+
+      except ConnectionResetError as _:
+        diconnect_bytes = '00010' + database.get_username_by_addr(addr)
+        disconn_cmd = UserDisconnect(diconnect_bytes, database)
+        status = disconn_cmd.execute(conn, addr)
+        signal.set_stop()
   
   def send_to_client(signal: RunningSignal):
     run = True
