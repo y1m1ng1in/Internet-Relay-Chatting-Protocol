@@ -371,7 +371,8 @@ class App:
             {'00001', '00002', '00003', '00004', '00005', '00006', '00007', '00010'})
           parsed.append(msg)
           if isinstance(msg, DisconnectStatus):
-            signal.set_stop()
+            if msg.username == self.cmd.client.username:
+              signal.set_stop()
 
         self.lock.acquire()
         for status in parsed:

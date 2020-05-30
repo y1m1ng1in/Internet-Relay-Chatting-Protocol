@@ -102,7 +102,15 @@ class Server:
         else:                 # unblocked by enqueu_message
           for msg in messages:  
             conn.send(msg.to_bytes())
+      
       except UserDisconnectedException as _:
+        run = False
+
+      except ConnectionResetError as _:
+        diconnect_bytes = '00010' + self.database.get_username_by_addr(addr)
+        disconn_cmd = UserDisconnect(diconnect_bytes, self.database)
+        status = disconn_cmd.execute(conn, addr)
+        signal.set_stop()
         run = False
 
 
