@@ -5,6 +5,7 @@ import threading
 from status import (
   Status, RegistrationStatus, JoinStatus, MessageStatus, DisconnectStatus,
   LeaveStatus, RoomUserListStatus, ListRoomStatus)
+from server import RunningSignal
 
 if len(sys.argv) < 3:
     print("USAGE: echo_client_sockets.py <HOST> <PORT>") 
@@ -308,8 +309,8 @@ while(user_unset):
     print(e.message)
 
 
-def sending_thread():
-  while(1):
+def sending_thread(signal: RunningSignal):
+  while(signal.is_run()):
     # if manually_disconnected == True:
     #   break
     msg = sys.stdin.readline()[:-1]
@@ -334,56 +335,63 @@ def sending_thread():
       print("Enter a single newline character to enter command.")
 
 
-def receive_thread():
-  run = True
-  while(run):
-    data = s.recv(10000000)
-    # print(data)
-    if data == b'':
-      break
-    data = data.decode(encoding="utf-8")
-    status = status_pattern.findall(data)
-    parsed = []
-    for msg in status:
-      msg = msg[1:-1]
-      if len(msg) >= 8:
-        command_code = msg[3:8]
-        if command_code == '00001':
-          parsed.append(RegistrationStatus.parse(msg))
-        elif command_code == '00002':
-          parsed.append(JoinStatus.parse(msg))
-        elif command_code == '00003' or command_code == '00004':
-          parsed.append(MessageStatus.parse(msg))
-        elif command_code == '00010':
-          parsed_msg = DisconnectStatus.parse(msg)
-          parsed.append(parsed_msg)
-          # print(parsed_msg.username, cmd.username)
-          if parsed_msg.username == cmd.username:
-            run = False
-        elif command_code == '00005':
-          parsed.append(LeaveStatus.parse(msg))
-        elif command_code == '00006':
-          parsed.append(RoomUserListStatus.parse(msg))
-        elif command_code == '00007':
-          parsed.append(ListRoomStatus.parse(msg))
+def receive_thread(signal: RunningSignal):
+  while(signal.is_run()):
+    try:
+      data = s.recv(10000000) # ConnectionResetError
+      # print(data)
+      if data == b'':
+        break
+      data = data.decode(encoding="utf-8")
+      status = status_pattern.findall(data)
+      parsed = []
+      for msg in status:
+        msg = msg[1:-1]
+        if len(msg) >= 8:
+          command_code = msg[3:8]
+          if command_code == '00001':
+            parsed.append(RegistrationStatus.parse(msg))
+          elif command_code == '00002':
+            parsed.append(JoinStatus.parse(msg))
+          elif command_code == '00003' or command_code == '00004':
+            parsed.append(MessageStatus.parse(msg))
+          elif command_code == '00010':
+            parsed_msg = DisconnectStatus.parse(msg)
+            parsed.append(parsed_msg)
+            # print(parsed_msg.username, cmd.username)
+            if parsed_msg.username == cmd.username:
+              signal.set_stop()
+          elif command_code == '00005':
+            parsed.append(LeaveStatus.parse(msg))
+          elif command_code == '00006':
+            parsed.append(RoomUserListStatus.parse(msg))
+          elif command_code == '00007':
+            parsed.append(ListRoomStatus.parse(msg))
+          else:
+            parsed.append(Status.parse(msg))
         else:
           parsed.append(Status.parse(msg))
-      else:
-        parsed.append(Status.parse(msg))
-      
-    lock.acquire()
-    for item in parsed:
-      if item.code in { 400, 401, 402, 411, 496, 497, 498, 499 }:  # errors...
-        item.print()
-      elif item.code in { 200 }:  # success
-        item.print()
-      else:
-        print("unknown status code...")
-    lock.release()
+        
+      lock.acquire()
+      for item in parsed:
+        if item.code in { 400, 401, 402, 411, 496, 497, 498, 499 }:  # errors...
+          item.print()
+        elif item.code in { 200 }:  # success
+          item.print()
+        else:
+          print("unknown status code...")
+      lock.release()
+    
+    except ConnectionResetError as _: # server crash
+      print("server disconnected.")
+      s.close()
+      signal.set_stop()
+
 
 if not manually_disconnected:
-  sending = threading.Thread(target=sending_thread)
-  receiving = threading.Thread(target=receive_thread)
+  signal = RunningSignal(True)
+  sending = threading.Thread(target=sending_thread, args=(signal,))
+  receiving = threading.Thread(target=receive_thread, args=(signal,))
 
   sending.start()
   receiving.start()
