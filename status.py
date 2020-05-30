@@ -348,7 +348,7 @@ class LeaveStatus(Status):
     if self.code == 200:
       print("[Room] " + self.room + " " + self.username + " leaved")
     else:
-      print("[Error code " + self.code + "] On room leaving: " + self.message)
+      print("[Error code " + str(self.code) + "] On room leaving: " + self.message)
 
 
 class RoomUserListStatus(Status):
@@ -393,7 +393,7 @@ class RoomUserListStatus(Status):
       for user in self.userlist:
         print(user)
     else:
-      print("[Error code " + self.code + "] On list users in room " + self.message )
+      print("[Error code " + str(self.code) + "] On list users in room " + self.message )
 
 
 class ListRoomStatus(Status):
@@ -434,4 +434,4 @@ class ListRoomStatus(Status):
       for room in self.rooms:
         print(room)
     else:
-      print("[Error code " + self.code + "] " + self.message)
+      print("[Error code " + str(self.code) + "] " + self.message)

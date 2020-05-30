@@ -8,11 +8,6 @@ from message import (
   Msg, RegistrationCommand, JoinCommand, CommandFactory, UserDisconnect)
 
 
-if len(sys.argv) < 2:
-  print("USAGE:   echo_server_sockets.py <PORT>") 
-  sys.exit(0)
-
-
 class User:
 
   def __init__(self, username, conn, addr):
