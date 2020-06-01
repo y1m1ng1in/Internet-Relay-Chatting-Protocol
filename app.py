@@ -75,9 +75,7 @@ class CmdExecution:
     sys.stdout.write('> ')
     sys.stdout.flush()
     name = sys.stdin.readline()[:-1]
-    if len(name) > 20:
-      print("Invalid username.")
-      return None
+    name = CmdExecution.room_name_sanitize(name)
     return name
 
   @staticmethod
@@ -231,7 +229,7 @@ class App:
     if len(msg) >= 8:
       command_code = msg[3:8]
       if command_code not in cmd_limits:
-        return None
+        return Status.parse(msg)
         
       if command_code == '00001':
         return RegistrationStatus.parse(msg)
@@ -254,7 +252,9 @@ class App:
       return Status.parse(msg)
 
   def print_status(self, status):
-    if status.code in { 400, 401, 402, 411, 420, 450, 451, 496, 497, 498, 499 }:  # errors...
+    if status.code in { 
+      400, 401, 402, 403, 411, 420, 450, 451, 462, 496, 497, 498, 499 
+    }:  # errors...
       status.print()
     elif status.code in { 200 }:  # success
       status.print()

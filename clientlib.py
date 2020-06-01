@@ -39,14 +39,14 @@ class Client:
   def register(self, username: str):
     if not self.disconnected:
       self.socket.send(
-        (self.command_code['register'] + username).encode(encoding="utf-8"))
+        ('$' + self.command_code['register'] + username + '$').encode(encoding="utf-8"))
 
   def join(self, room: str):
     if not self.username:
       raise EmptyUsernameException
     if not self.disconnected:
       self.socket.send(
-        (self.command_code['join'] + room + self.username).encode(encoding="utf-8"))
+        ('$' + self.command_code['join'] + room + self.username + '$').encode(encoding="utf-8"))
     
   def room_message(self, rooms: set, msg: str):
     if not self.username:
@@ -58,7 +58,7 @@ class Client:
     else:
       str_room_num = str(len(rooms))
     if not self.disconnected:
-      bytes = self.command_code['room msg'] + str_room_num + ''.join(rooms) + msg
+      bytes = '$' + self.command_code['room msg'] + str_room_num + ''.join(rooms) + msg + '$'
       self.socket.send(bytes.encode(encoding="utf-8"))
 
   def private_message(self, users: set, msg: str):
@@ -71,33 +71,33 @@ class Client:
     else:
       str_user_num = str(len(users))
     if not self.disconnected:
-      bytes = self.command_code['user msg'] + str_user_num + '&'.join(users) + '#' + msg
+      bytes = '$' + self.command_code['user msg'] + str_user_num + '&'.join(users) + '#' + msg + '$'
       self.socket.send(bytes.encode(encoding="utf-8"))
 
   def disconnect(self):
     if not self.username:
       raise EmptyUsernameException
     if not self.disconnected:
-      bytes = (self.command_code['disconn'] + self.username).encode(encoding="utf-8")
+      bytes = ('$' + self.command_code['disconn'] + self.username + '$').encode(encoding="utf-8")
       self.socket.send(bytes)  
 
   def leave(self, room: str):
     if not self.username:
       raise EmptyUsernameException
     if not self.disconnected:
-      bytes = (self.command_code['leave'] + room + self.username).encode(encoding="utf-8")
+      bytes = ('$' + self.command_code['leave'] + room + self.username + '$').encode(encoding="utf-8")
       self.socket.send(bytes)
 
   def list_room_users(self, room: str):
     if not self.username:
       raise EmptyUsernameException
     if not self.disconnected:
-      bytes = (self.command_code['room users'] + room).encode(encoding="utf-8")
+      bytes = ('$' + self.command_code['room users'] + room + '$').encode(encoding="utf-8")
       self.socket.send(bytes)
 
   def list_rooms(self):
     if not self.username:
       raise EmptyUsernameException
     if not self.disconnected:
-      bytes = (self.command_code['rooms']).encode(encoding="utf-8")
+      bytes = ('$' + self.command_code['rooms'] + '$').encode(encoding="utf-8")
       self.socket.send(bytes)

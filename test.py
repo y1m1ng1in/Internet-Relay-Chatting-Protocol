@@ -35,6 +35,7 @@ def client(host, port: int, username: str, rooms: set, users: set, message: str,
   
   # setup client and register username
   client = Client(s)
+  username = CmdExecution.room_name_sanitize(username)
   client.register(username) # assume the username is unique
   client.set_username(username)
   s.recv(1024)

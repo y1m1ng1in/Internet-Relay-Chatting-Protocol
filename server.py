@@ -1,9 +1,12 @@
 import socket
 import sys
 import threading
+import re
 from serverlib import User, Room, Table, RunningSignal
-from message import (CommandFactory, CommandError, RegistrationCommand, UserDisconnect)
-from status import(Status, DisconnectStatus, UserDisconnectedException)
+from message import (
+  CommandFactory, CommandError, RegistrationCommand, UserDisconnect)
+from status import(
+  Status, DisconnectStatus, UserDisconnectedException)
 
 
 class Server:
@@ -24,9 +27,10 @@ class Server:
       t.start()
 
   def client_connection(self, conn, addr):
-    communication_init_signal = self.registration_phrase(conn, addr)
+    communication_init_signal, remained_msgs = self.registration_phrase(conn, addr)
     if communication_init_signal:
-      self.communication_phrase(conn, addr, RunningSignal(communication_init_signal))
+      self.communication_phrase(
+        conn, addr, RunningSignal(communication_init_signal), remained_msgs)
 
   def registration_phrase(self, conn, addr):
     print('client is at', addr) 
@@ -37,23 +41,33 @@ class Server:
       if client_msg == b'':
         init_signal = False   # client close the conn during registration
         conn.close()
-        return init_signal
+        return init_signal, []
 
       client_msg = client_msg.decode(encoding="utf-8")
-      print("addr: ", addr, "client message:", client_msg)
+      msg_pattern = re.compile('\$[^\$]+\$')
+      msg_list = msg_pattern.findall(client_msg)
+      print("addr: ", addr, "client message:", msg_list)
 
-      registration = RegistrationCommand(client_msg, self.database)
-      status = registration.execute(conn, addr)
-      conn.send(status.to_bytes())
-      
-      if status.code == 200:
-        return init_signal
-        # now a user identity has been added into db
-        # then go to concurrent receiving and sending stage...
+      for index, msg in enumerate(msg_list):
+        msg = msg[1:-1]
+        registration = RegistrationCommand(msg, self.database)
+        status = registration.execute(conn, addr)
+        conn.send(status.to_bytes())
+        
+        if status.code == 200:
+          return init_signal, msg_list[index+1:]
+          # now a user identity has been added into db
+          # then go to concurrent receiving and sending stage...
 
-  def communication_phrase(self, conn, addr, signal: RunningSignal):
-    producer_thread = threading.Thread(target=self.__receiving_thread, args=(conn, addr, signal))
-    consumer_thread = threading.Thread(target=self.__sending_thread, args=(conn, addr, signal))
+  def communication_phrase(self, conn, addr, signal: RunningSignal, 
+                           remained_msgs: list):
+    producer_thread = threading.Thread(
+      target=self.__receiving_thread, 
+      args=(conn, addr, signal, remained_msgs))
+
+    consumer_thread = threading.Thread(
+      target=self.__sending_thread, 
+      args=(conn, addr, signal))
     
     producer_thread.start()
     consumer_thread.start()
@@ -64,7 +78,8 @@ class Server:
     print(conn, addr, " joined")
     conn.close()
 
-  def __receiving_thread(self, conn, addr, signal: RunningSignal):
+  def __receiving_thread(self, conn, addr, signal: RunningSignal, 
+                         remained_msgs: list):
     while(signal.is_run()):
       try:
         client_msg = conn.recv(1000000)
@@ -74,13 +89,20 @@ class Server:
           break 
 
         client_msg = client_msg.decode(encoding="utf-8")
-        print("addr: ", addr, "client message:", client_msg)
+        msg_pattern = re.compile('\$[^\$]+\$')
+        msg_list = msg_pattern.findall(client_msg)
+        if len(remained_msgs) != 0:
+          msg_list = remained_msgs + msg_list
+          remained_msgs = []
+        print("addr: ", addr, "client message:", msg_list)
 
-        cmd = self.command_factory.produce(client_msg, self.database)
-        status = cmd.execute(conn, addr)
-        if isinstance(status, DisconnectStatus) and status.code == 200:
-          # status.print()
-          signal.set_stop()
+        for msg in msg_list:
+          msg = msg[1:-1]
+          cmd = self.command_factory.produce(msg, self.database)
+          status = cmd.execute(conn, addr)
+          if isinstance(status, DisconnectStatus) and status.code == 200:
+            # status.print()
+            signal.set_stop()
 
       except CommandError as _:
         status = Status(400, "Bad command")

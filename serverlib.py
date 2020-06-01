@@ -92,7 +92,7 @@ class Table:
   def user_registration(self, username: str, conn, addr):
     self.lock.acquire()
     status = self.__valid_registration(username, addr)
-    if status.code not in { 401, 402 }:
+    if status.code not in { 401, 402, 403 }:
       self.users[username] = User(username, conn, addr)
       self.conns[hash(addr)] = username
       print("hash", addr, hash(addr))
@@ -256,10 +256,20 @@ class Table:
     return username
 
   def __create_room(self, roomName: str, creator: User):
+    if len(roomName) != 20:
+      return Status(403, "Invalid room name format")
+    for c in range(len(roomName)):
+      if roomName[c] in { '$', '#', '&' }:
+        return Status(403, "Invalid room name format")
     self.rooms[roomName] = Room(roomName, creator)
     return JoinStatus(200, "success", roomName, creator.name, True)
 
   def __valid_registration(self, username: str, addr):
+    if len(username) != 20:
+      return Status(403, "Invalid username format")
+    for c in range(len(username)):
+      if username[c] in { '$', '#', '&' }:
+        return Status(403, "Invalid username format")
     for id in self.users:
       if self.users[id].addr == addr:
         return RegistrationStatus(401, "Duplicated registration", username)
