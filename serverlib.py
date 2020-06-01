@@ -244,14 +244,20 @@ class Table:
     """ Return username that corresponds to given address.
         This function should always be called after validate the given addr.
         If the hash of addr is not presented, it is an internal error of 
-        our server code.
+        our server code except ConnectionResetError, in which case the AddrError
+        exception should be handled. In other cases, the addr must have a 
+        corresponding username in the database after registration.
     """
     self.lock.acquire()
     if hash(addr) in self.conns:
       username = self.conns[hash(addr)]
     else:
       self.lock.release()
-      raise AddrError()   # error occurs due to server code itself
+      # error occurs due to server code itself except the server handle 
+      # ConnectionResetError. This is because two thread can catch ConnectionResetError
+      # concurrently, and one of the thread can clear user's connection record first.
+      # and another thread will catch this AddrError exception.
+      raise AddrError()   
     self.lock.release()
     return username
 

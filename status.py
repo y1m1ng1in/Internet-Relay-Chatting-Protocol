@@ -240,12 +240,12 @@ class MessageStatus(Status):
       if self.code == 200:
         print("[Room] " + self.room + " " + self.sender + " sent: " + self.data)
       else:
-        print("[Error code " + str(self.code) + "] Message sent to room: " + self.room + " " + self.message)
+        print("[Error code " + str(self.code) + "] " + self.room + " " + self.message)
     else:
       if self.code == 200:
         print("[Private] " + self.sender + " sent to " + self.username + ": " + self.data)
       else:
-        print("[Error code " + str(self.code) + "] Message sent to client: " + self.username + " " + self.message)
+        print("[Error code " + str(self.code) + "] " + self.username + " " + self.message)
 
 
 class DisconnectStatus(Status):
@@ -306,7 +306,7 @@ class DisconnectStatus(Status):
       else:
         print("[Room] " + self.room + " " + self.username + " disconnected.")
     else:
-      print("[Error code " + str(self.code) + "] On disconnection: " + self.message)
+      print("[Error code " + str(self.code) + "] " + self.message)
 
 
 class LeaveStatus(Status):
@@ -348,7 +348,7 @@ class LeaveStatus(Status):
     if self.code == 200:
       print("[Room] " + self.room + " " + self.username + " leaved")
     else:
-      print("[Error code " + str(self.code) + "] On room leaving: " + self.message)
+      print("[Error code " + str(self.code) + "] " + self.message)
 
 
 class RoomUserListStatus(Status):
@@ -393,7 +393,7 @@ class RoomUserListStatus(Status):
       for user in self.userlist:
         print(user)
     else:
-      print("[Error code " + str(self.code) + "] On list users in room " + self.message )
+      print("[Error code " + str(self.code) + "] " + self.message )
 
 
 class ListRoomStatus(Status):

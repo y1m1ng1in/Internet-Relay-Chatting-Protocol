@@ -166,6 +166,12 @@ class UserMessageToRooms(Msg):
       return status
 
     sender_name = self.table.get_username_by_addr(addr)
+
+    if not self.__valid_arguments():
+      status = Status(410, "bad argument. the number of room names given is not equal to paramater room_num")
+      self.table.enqueue_message(status, [sender_name])
+      return status
+
     status = self.__valid_room_names(sender_name)
     if status.code == 200:
       receivers = self.__get_receivers()
@@ -176,15 +182,24 @@ class UserMessageToRooms(Msg):
       receivers = [sender_name]
       self.table.enqueue_message(status, receivers)
 
+  def __valid_arguments(self):
+    """ Check whether the length of room list parsed is same as the room number argument
+    """
+    return len(self.rooms) == self.room_num
+
   def __valid_room_names(self, sender):
+    """ Check whether room names given are existing in database. Once there is a non-existing
+        room name, return an error code 497 and no message is sent.
+    """
     for roomName in self.rooms:
       # if roomName not in self.table.rooms:
       if not self.table.has_room(roomName):
         return MessageStatus(497, "Room not found", True, sender, roomName, '', self.message)
-      else:
-        return Status(200, "success")
+    return Status(200, "success")
 
   def __get_receivers(self):
+    """ Get a dict of receivers in order to compose different message based on room name.
+    """
     receivers = {}
     for roomName in self.rooms:
       receivers[roomName] = self.table.list_room_users(roomName)
@@ -198,7 +213,6 @@ class UserMessageToUsers(Msg):
       args: 
         number of users to send (99 max, 2 digit)
         message
-        00004__weirj&siofjwie&wioerj&ewroj#_____________
   """
   def __init__(self, bytes, table):
     super().__init__(bytes, table)
@@ -213,6 +227,12 @@ class UserMessageToUsers(Msg):
       return status
 
     sender_name = self.table.get_username_by_addr(addr)
+
+    if not self.__valid_arguments():
+      status = Status(410, "bad argument. the number of room names given is not equal to paramater room_num")
+      self.table.enqueue_message(status, [sender_name])
+      return status
+
     status = self.__valid_usernames(sender_name)
     if status.code == 200:
       for user in self.users:
@@ -224,13 +244,15 @@ class UserMessageToUsers(Msg):
       receivers = [sender_name]
       self.table.enqueue_message(status, receivers)
 
+  def __valid_arguments(self):
+    return self.user_num == len(self.users)
+
   def __valid_usernames(self, sender):
     for username in self.users:
       # if username not in self.table.users:
       if not self.table.has_username(username):
         return MessageStatus(496, "Message receiver not found", False, sender, '', username, self.message)
-      else:
-        return Status(200, "success")
+    return Status(200, "success")
 
 
 class UserDisconnect(Msg):
@@ -309,7 +331,6 @@ class ListJoinedUsers(Msg):
         status = RoomUserListStatus(200, "success", self.room, userlist)
       else:
         status = RoomUserListStatus(451, "Room not found to list joined users", self.room, set())
-      # status.print()
       self.table.enqueue_message(status, [self.table.get_username_by_addr(addr)])
     return status
 

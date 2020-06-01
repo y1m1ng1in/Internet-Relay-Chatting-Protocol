@@ -6,7 +6,7 @@ from serverlib import User, Room, Table, RunningSignal
 from message import (
   CommandFactory, CommandError, RegistrationCommand, UserDisconnect)
 from status import(
-  Status, DisconnectStatus, UserDisconnectedException)
+  Status, DisconnectStatus, UserDisconnectedException, AddrError)
 
 
 class Server:
@@ -109,10 +109,15 @@ class Server:
         self.database.enqueue_message(status, [self.database.conns[hash(addr)]])
 
       except ConnectionResetError as _:
-        diconnect_bytes = '00010' + self.database.get_username_by_addr(addr)
-        disconn_cmd = UserDisconnect(diconnect_bytes, self.database)
-        status = disconn_cmd.execute(conn, addr)
-        signal.set_stop()
+        try:
+          username_to_disconnect = self.database.get_username_by_addr(addr)
+          diconnect_bytes = '00010' + username_to_disconnect
+          disconn_cmd = UserDisconnect(diconnect_bytes, self.database)
+          status = disconn_cmd.execute(conn, addr)
+          signal.set_stop()
+        except AddrError as _:  # another thread has already cleared the connection record
+          signal.set_stop()
+        
 
   def __sending_thread(self, conn, addr, signal: RunningSignal):
     run = True
@@ -129,11 +134,15 @@ class Server:
         run = False
 
       except ConnectionResetError as _:
-        diconnect_bytes = '00010' + self.database.get_username_by_addr(addr)
-        disconn_cmd = UserDisconnect(diconnect_bytes, self.database)
-        status = disconn_cmd.execute(conn, addr)
-        signal.set_stop()
-        run = False
+        try:
+          diconnect_bytes = '00010' + self.database.get_username_by_addr(addr)
+          disconn_cmd = UserDisconnect(diconnect_bytes, self.database)
+          status = disconn_cmd.execute(conn, addr)
+          signal.set_stop()
+          run = False
+        except AddrError as _:  # another thread has already cleared the connection record
+          signal.set_stop()
+          run = False
 
 
 def main():
