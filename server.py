@@ -82,7 +82,7 @@ class Server:
                          remained_msgs: list):
     while(signal.is_run()):
       try:
-        client_msg = conn.recv(1000000)
+        client_msg = conn.recv(10240)
 
         if client_msg == b'':
           conn.close()

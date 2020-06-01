@@ -54,7 +54,7 @@ class CmdExecution:
   @staticmethod
   def room_name_sanitize(name: str):
     if len(name) > 20:
-      print("Invalid room name.")
+      print("Invalid input: length is greater then 20.")
       return None
     padding = 20 - len(name)
     name += ' ' * padding
@@ -117,7 +117,8 @@ class Registration(CmdExecution):
 
   def execute(self):
     name = CmdExecution.input_username()
-    self.client.register(name)
+    if name != None:
+      self.client.register(name)
     return name
 
 
@@ -268,10 +269,17 @@ class App:
     return msg
 
   def receive_server_status(self):
-    data = self.s.recv(10000000)
+    data = self.s.recv(10240)
     data = data.decode(encoding="utf-8")
     status = self.status_pattern.findall(data)
     return status
+
+  def print_prompt(self):
+    print('Internet Relay Chatting Client')
+    print('Copyright (c) 2020 Yiming Lin')
+    print("\n\ntype in 'register' first to register a username")
+    print("\nAfter registration success, the following commands are available:")
+    print("join\nroom message\nprivate message\nquit\nleave\nroom users\nrooms\n\n")
 
   def run(self):
     disconn = self.registeration_phrase()
@@ -281,6 +289,8 @@ class App:
   def registeration_phrase(self):
     manually_disconnected = False
 
+    self.print_prompt()
+
     while(self.user_unset and not manually_disconnected):
       msg = self.get_input_command()
       if msg == 'quit': 
@@ -289,6 +299,9 @@ class App:
 
       try:
         to_execute = self.cmd.parse(msg)
+        if not isinstance(to_execute, Registration):
+          print("type 'register' to register a username first.")
+          continue
         to_execute.execute()
 
         status = self.receive_server_status()
@@ -331,6 +344,7 @@ class App:
     print("Disconnected from server successfully.")
 
   def __sending_thread(self, signal: RunningSignal):
+    print("\nEnter a single newline character to enter command.\n")
     while(signal.is_run()):
       msg = sys.stdin.readline()[:-1]
       if not signal.is_run(): # receiving thread terminated
@@ -356,7 +370,7 @@ class App:
   def __receiving_thread(self, signal: RunningSignal):
     while(signal.is_run()):
       try:
-        data = self.s.recv(10000000) # ConnectionResetError
+        data = self.s.recv(10240) # ConnectionResetError
         if data == b'':
           break
 
