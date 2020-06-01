@@ -1,3 +1,5 @@
+# Copyright (c) 2020 Yiming Lin <yl6@pdx.edu>
+
 class Error(Exception):
   """ Base class for client errors.
   """

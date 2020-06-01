@@ -1,3 +1,5 @@
+# Copyright (c) 2020 Yiming Lin <yl6@pdx.edu>
+
 import socket
 import sys
 import re

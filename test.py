@@ -1,3 +1,19 @@
+# Copyright (c) 2020 Yiming Lin <yl6@pdx.edu>
+#
+# A testing program that creates given number of processes and ech establish
+# a connection to the running server. Each child process join rooms and 
+# send room messages and private messages to specified rooms and clients 
+# multiple times and then they will leave all the rooms they joined.
+# Finally they will disconnect from the server
+#
+# Each room message and private message will be appended a "program-comment-styled"
+# string to indicate which iteration the testing program is currently in.
+#
+# Each child process will register a username as "tester-[number]"
+#
+# This program assumes that the rooms have been created by running application
+# in order to let running application display messages the "testers" send.
+
 import socket
 import sys
 import time

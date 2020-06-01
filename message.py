@@ -1,3 +1,5 @@
+# Copyright (c) 2020 Yiming Lin <yl6@pdx.edu>
+
 from status import (
   Status, CommandError, JoinStatus, MessageStatus, DisconnectStatus,
   LeaveStatus, RoomUserListStatus, ListRoomStatus)

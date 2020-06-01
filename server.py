@@ -1,3 +1,5 @@
+# Copyright (c) 2020 Yiming Lin <yl6@pdx.edu>
+
 import socket
 import sys
 import threading
@@ -10,7 +12,31 @@ from status import(
 
 
 class Server:
+  """ The central server for IRC protocol. 
 
+      The server maintains a database that stores connected clients'
+      connection, user identity, and room information (see class Table
+      in serverlib.py). 
+
+      The command factory produces different kinds of subclasses of Msg
+      class. Every subclass object overrides Msg's execute() method.
+      The command factory produces Msg objects and execute() them, which 
+      will return Status objects, those Status object then enqueue to 
+      clients' message queue. Finally all the Status objects are parsed 
+      into byte-object and send to each client. 
+
+      Attributes:
+        database (Table)                : a Table object which stores all 
+                                          the clients, rooms information.
+                                          Database will be accessed by all 
+                                          the child threads of the server.
+        command_factory (CommandFactory): A CommandFactory object which 
+                                          produces Msgs based on message
+                                          sent by connected clients.
+        s (socket)                      : server socket object
+        host (str)                      : host name
+        port (int)                      : port number
+  """
   def __init__(self, port):
     self.database = Table(threading.Lock())
     self.command_factory = CommandFactory()
@@ -21,33 +47,59 @@ class Server:
     self.s.listen(1)
 
   def run(self):
+    """ The main infinite loop of server. Once a client connects to the server,
+        create a new thread for that client and start that thread immediately.
+    """
     while (1):
       conn, addr = self.s.accept()
       t = threading.Thread(target=self.client_connection, args=(conn, addr))
       t.start()
 
   def client_connection(self, conn, addr):
+    """ The main function for child thread of client connection
+        Registration phrase goes first. If client does not close the connection
+        from registration pharse, then enter into communication phrase.
+    """
     communication_init_signal, remained_msgs = self.registration_phrase(conn, addr)
     if communication_init_signal:
       self.communication_phrase(
         conn, addr, RunningSignal(communication_init_signal), remained_msgs)
 
   def registration_phrase(self, conn, addr):
+    """ The registration phrase for the client. 
+    
+        If the client closes the connection during this phrase, this function
+        returns False to indicate communication phrase will not be entered.
+        
+        Otherwise, this function receives client's message. For each message
+        the client sent, this function treats message as RegistrationCommand,
+        and attempting to parse. Once a valid registration occurs, in other words,
+        the client's entity has been recorded into server's database successfully,
+        this function returns True with a list of unexecuted commands that are
+        to executed in the communication phrase.
+    """
     print('client is at', addr) 
     init_signal = True
     while(1):
-      client_msg = conn.recv(1000000)
+      client_msg = conn.recv(10240)
 
       if client_msg == b'':
         init_signal = False   # client close the conn during registration
         conn.close()
         return init_signal, []
 
+      # decode the message into string. Split the message into a list of 
+      # un-parsed commands (in case of multiple commands are received together)
       client_msg = client_msg.decode(encoding="utf-8")
       msg_pattern = re.compile('\$[^\$]+\$')
       msg_list = msg_pattern.findall(client_msg)
       print("addr: ", addr, "client message:", msg_list)
 
+      # for each un-parsed command in the list, treat it as a registration command
+      # (since at this point, the user entity has not been in database)
+      # once a RegistrationCommand is executed and a success code 200 is returned,
+      # this function returns and the rest of the commands are to execute in the
+      # next phrase.
       for index, msg in enumerate(msg_list):
         msg = msg[1:-1]
         registration = RegistrationCommand(msg, self.database)
@@ -61,20 +113,32 @@ class Server:
 
   def communication_phrase(self, conn, addr, signal: RunningSignal, 
                            remained_msgs: list):
+    """ The communication phrase for the client.
+
+        This function will produce two child threads which are to run concurrently.
+        One thread receives messages that are sent from connected client. The other 
+        thread get all the messages in the user's message queue and clear the message
+        queue, then convert all the message into bytes and send them back to client.
+    """
+    # the producer thread that generate messages that are to send to clients.
+    # and enqueue them to message queue
     producer_thread = threading.Thread(
       target=self.__receiving_thread, 
       args=(conn, addr, signal, remained_msgs))
 
+    # the consumer thread that fetch messages from client's message queue then 
+    # send them back to client
     consumer_thread = threading.Thread(
       target=self.__sending_thread, 
       args=(conn, addr, signal))
     
-    producer_thread.start()
+    producer_thread.start()   
     consumer_thread.start()
 
     producer_thread.join()
     consumer_thread.join()
 
+    # once the user has disconnected, close the connection.
     print(conn, addr, " joined")
     conn.close()
 

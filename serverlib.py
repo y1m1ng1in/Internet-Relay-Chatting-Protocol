@@ -1,3 +1,5 @@
+# Copyright (c) 2020 Yiming Lin <yl6@pdx.edu>
+
 import socket
 import sys
 import threading
@@ -9,7 +11,19 @@ from message import (
 
 
 class User:
+  """ The user object that stores username, connection socket object,
+      and the address of the connected client. 
 
+      Attributes:
+        name (str)                   : the name of the user
+        conn (socket)                : the connection socket
+        addr (tuple)                 : the address of the connected client
+        lock (Threading.Lock)        : the lock for concurrent message queue
+        has_msg (Threading.Condition): the conditional variable for message
+                                       queue is not empty
+        msg_queue (list)             : message queue that stores Status object
+        is_disconnected (bool)       : indicates if the user has disconnected
+  """
   def __init__(self, username, conn, addr):
     self.name      = username
     self.conn      = conn
@@ -46,6 +60,9 @@ class User:
     self.lock.release()
 
   def disconnection_release(self):
+    """ Notify has_msg conditional variable to unblock get_messages call
+        when a user is disconnecting. 
+    """
     self.lock.acquire()
     self.is_disconnected = True
     self.has_msg.notify()
@@ -196,15 +213,24 @@ class Table:
     return users
 
   def enqueue_message(self, message: Status, receivers: list):
+    """ Enqueue a message object in to target users' message queue given in the 
+        receiver list. 
+    """
     for receiver in receivers:
       if receiver in self.users:
         self.users[receiver].enqueue_message(message)
 
   def flush_message_queue(self, addr):
+    """ Return a list of message objects that are to send back to client at 
+        address addr. 
+        __NOTE__:
+        This function call will be blocked until the message queue of user 
+        at addr has already been enqueued some Status object. 
+    """
     if hash(addr) not in self.conns:
       raise UserDisconnectedException
     username = self.conns[hash(addr)]
-    message = self.users[username].get_messages() # return whem message available
+    message = self.users[username].get_messages() # return when message available
     return message
 
   def has_room(self, roomName: str):
